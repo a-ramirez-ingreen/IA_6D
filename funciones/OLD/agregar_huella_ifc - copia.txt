@@ -1,0 +1,54 @@
+
+import ifcopenshell
+import ifcopenshell.api
+import os
+import pandas as pd
+
+def agregar_huella_ifc(ruta_ifc_original, df_resultado, nombre_salida="exportado_con_IA.ifc"):
+    """
+    Agrega un PropertySet 'ImpactoAmbiental' a los elementos del IFC original con valores de huella de carbono.
+    Requiere columna 'ID' y 'Total' (puede venir como 'Huella' o 'GWP').
+    La unidad se fija por defecto como 'kg CO2 eq'.
+    """
+    if not os.path.isfile(ruta_ifc_original):
+        raise FileNotFoundError("IFC original no encontrado")
+
+    if "Total" not in df_resultado.columns:
+        posibles = ["Huella", "GWP"]
+        for col in posibles:
+            if col in df_resultado.columns:
+                df_resultado = df_resultado.rename(columns={col: "Total"})
+                break
+        else:
+            raise ValueError("No se encontró columna de huella ('Total', 'Huella' o 'GWP') en los resultados.")
+
+    if "ID" not in df_resultado.columns:
+        raise ValueError("La columna 'ID' es obligatoria para identificar los elementos IFC.")
+
+    model = ifcopenshell.open(ruta_ifc_original)
+
+    for idx, row in df_resultado.iterrows():
+        guid = row.get("ID")
+        huella = row.get("Total")
+        unidad = "kg CO2 eq"  # Unidad fija por defecto
+
+        if not guid or pd.isna(huella):
+            continue
+
+        producto = model.by_guid(str(guid).strip())
+        if not producto:
+            continue
+
+        # Crear pset
+        pset = ifcopenshell.api.run("pset.add_pset", model, product=producto, name="ImpactoAmbiental")
+
+        # Añadir propiedades
+        ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
+            "IA_HuellaCarbono": float(huella),
+            "IA_Unidad": unidad
+        })
+
+    os.makedirs("resultados", exist_ok=True)
+    ruta_exportado = os.path.join("resultados", nombre_salida)
+    model.write(ruta_exportado)
+    return ruta_exportado
